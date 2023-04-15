@@ -1,16 +1,11 @@
 package handler
 
 import (
-	"flag"
 	"fmt"
 	"net"
 	"sort"
 	"sync"
 )
-
-var startPort = flag.Int("start", 1, "Start port")
-var endPort = flag.Int("end", 65535, "End port")
-var ipAddress = flag.String("ip", "127.0.0.1", "ipAddress")
 
 func GetIpAddress() []string {
 	// 获取本地主机的所有 IP 地址
@@ -34,12 +29,12 @@ func GetIpAddress() []string {
 	return ipSlices
 }
 
-func ScanPort() []int {
+func ScanPort(startPort int, endPort int) []int {
 
 	openPorts := []int{}
 	var wg sync.WaitGroup
 
-	for i := 1; i <= 10000; i++ {
+	for i := startPort; i <= endPort; i++ {
 		wg.Add(1)
 		go func(port int) {
 			defer wg.Done()
