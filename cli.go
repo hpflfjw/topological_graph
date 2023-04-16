@@ -76,9 +76,10 @@ func (h *CliHandler) RunConnectData() error {
 
 	port := h.Args[0]
 
-	fmt.Println(fmt.Sprintf("connect_data 扫描的端口为%s,连接信息:", port))
+	fmt.Println(fmt.Sprintf("connect_data 扫描的端口为%s, 连接信息:", port))
 
-	handler.GetPacketData(port)
+	connectData := handler.GetPacketData(port)
+	util.ToCsvFile(port, connectData)
 	return nil
 }
 
@@ -86,7 +87,7 @@ func (h *CliHandler) RunGraph() error {
 
 	port := h.Args[0]
 
-	fmt.Println(fmt.Sprintf("graph 扫描的端口为:%s， 将会生成拓扑图", port))
+	fmt.Println(fmt.Sprintf("graph 扫描的端口为:%s, 将会生成拓扑图", port))
 
 	connectData := handler.GetPacketData(port)
 

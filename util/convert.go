@@ -6,9 +6,9 @@ import (
 	"topological_graph/model"
 )
 
-func ToCsvFile(port int, connectDatas []*model.ConnectData) {
+func ToCsvFile(port string, connectDatas []*model.ConnectData) {
 
-	file, err := os.Create("port " + string(port) + " data.csv")
+	file, err := os.Create("port " + port + " data.csv")
 	if err != nil {
 		panic(err)
 	}
