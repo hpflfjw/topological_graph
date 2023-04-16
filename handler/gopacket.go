@@ -2,7 +2,8 @@ package handler
 
 import (
 	"fmt"
-	"log"
+	"os/exec"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -10,12 +11,11 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 
+	"go.uber.org/zap"
 	"topological_graph/model"
-	"topological_graph/util"
 )
 
 var (
-	device      string        = "en0"            //	网络设备
 	snapshotLen int32         = 1024             // 每个数据包读取的最大长度 the maximum size to read for each packet
 	promiscuous bool          = true             // 是否将网口设置为混杂模式,即是否接收目的地址不为本机的包
 	timeout     time.Duration = -1 * time.Second // 设置抓到包返回的超时，-1为立即返回
@@ -23,32 +23,32 @@ var (
 	err         error
 	recordData  []*model.ConnectData
 	captureTime time.Duration = time.Second * 10
+	logger      *zap.Logger
 )
 
-//func FindAllDevice() {
-//	// 得到所有的(网络)设备
-//	devices, err := pcap.FindAllDevs()
-//	if err != nil {
-//		log.Fatal(err)
-//	}
-//	// 打印设备信息
-//	fmt.Println("Devices found:")
-//	for _, device := range devices {
-//		fmt.Println("\nName: ", device.Name)
-//		fmt.Println("Description: ", device.Description)
-//		fmt.Println("Devices addresses: ", device.Description)
-//		for _, address := range device.Addresses {
-//			fmt.Println("- IP address: ", address.IP)
-//			fmt.Println("- Subnet mask: ", address.Netmask)
-//		}
-//	}
-//}
+func init() {
+	logger, err = zap.NewProduction()
+	if err != nil {
+		fmt.Println("Failed to init logger")
+		return
+	}
+}
 
 func GetPacketData(port string) []*model.ConnectData {
-	// 打开网络接口
-	handle, err = pcap.OpenLive(device, snapshotLen, promiscuous, timeout)
+
+	// 获取网络设备
+	deviceInfo, err := GetConfig()
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("GetConfig error", zap.Error(err))
+	}
+	if len(deviceInfo) == 0 {
+		logger.Error("No device found")
+	}
+
+	// 打开网络接口
+	handle, err = pcap.OpenLive(deviceInfo[0].Name, snapshotLen, promiscuous, timeout)
+	if err != nil {
+		logger.Error("Failed to open live", zap.Error(err))
 	}
 	defer handle.Close()
 
@@ -56,9 +56,9 @@ func GetPacketData(port string) []*model.ConnectData {
 	var filter = "tcp"
 	err = handle.SetBPFFilter(filter)
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("Failed to set BPF filter", zap.Error(err))
 	}
-	fmt.Println("Only capturing TCP port " + port + " packets")
+	logger.Info("Only capturing TCP port " + port + " packets")
 
 	// 循环抓包
 	endTime := time.Now().Add(captureTime)
@@ -73,7 +73,7 @@ func GetPacketData(port string) []*model.ConnectData {
 		// 获取TCP层
 		tcpLayer := packet.Layer(layers.LayerTypeTCP)
 		if tcpLayer == nil {
-			log.Fatalln("nil tcp")
+			logger.Error("nil tcp")
 		}
 		tcp, _ := tcpLayer.(*layers.TCP)
 		if !tcp.SYN || !tcp.ACK || tcp.SrcPort != 80 {
@@ -83,12 +83,9 @@ func GetPacketData(port string) []*model.ConnectData {
 		// 获取ip层信息
 		ipv4Layer := packet.Layer(layers.LayerTypeIPv4)
 		if ipv4Layer == nil {
-			log.Fatalln("nil ipv4")
+			logger.Error("nil ipv4")
 		}
 		ipv4, _ := ipv4Layer.(*layers.IPv4)
-		if fmt.Sprintf("%s", ipv4.DstIP) != "10.21.168.4" {
-			fmt.Println("ClientIP = ", fmt.Sprintf("%s", ipv4.DstIP)+"and ServerIP = "+fmt.Sprintf("%s", ipv4.SrcIP))
-		}
 
 		// 根据tcp三次握手，syn+ack是服务端到客户端的包
 		current := &model.ConnectData{
@@ -97,11 +94,47 @@ func GetPacketData(port string) []*model.ConnectData {
 			ServerIP:   fmt.Sprintf("%s", ipv4.SrcIP),
 			ClientIP:   fmt.Sprintf("%s", ipv4.DstIP),
 		}
+		logger.Info("Captured packet",
+			zap.String("ServerIP", current.ServerIP),
+			zap.String("ServerPort", current.ServerPort),
+			zap.String("ClientIP", current.ClientIP),
+			zap.String("ClientPort", current.ClientPort),
+		)
 		recordData = append(recordData, current)
 	}
 
-	fmt.Println("链接数" + strconv.Itoa(len(recordData)))
+	logger.Info("Capture finished, total " + strconv.Itoa(len(recordData)) + " packets")
 
-	util.PrintConnectData(recordData)
 	return recordData
+}
+
+func GetConfig() ([]*model.InterfaceInfo, error) {
+	cmd := exec.Command("ifconfig")
+	output, err := cmd.Output()
+	if err != nil {
+		logger.Error("Command execution failed", zap.Error(err))
+		return nil, err
+	}
+
+	outputString := string(output)
+
+	re := regexp.MustCompile(`(?s)(\w+):\s.*?ether\s(.+?)\s.*?inet\s(.+?)\s.*?netmask\s(.+?)\s`)
+	matches := re.FindAllStringSubmatch(outputString, -1)
+
+	var ret []*model.InterfaceInfo
+	for _, match := range matches {
+		interfaceInfo := &model.InterfaceInfo{
+			Name:       match[1],
+			MacAddress: match[2],
+			IP:         match[3],
+			Netmask:    match[4],
+		}
+		logger.Info("Interface info",
+			zap.String("Name", interfaceInfo.Name),
+			zap.String("MacAddress", interfaceInfo.MacAddress),
+			zap.String("IP", interfaceInfo.IP),
+			zap.String("Netmask", interfaceInfo.Netmask),
+		)
+	}
+	return ret, nil
 }

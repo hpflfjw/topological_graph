@@ -6,3 +6,10 @@ type ConnectData struct {
 	ServerIP   string
 	ClientIP   string
 }
+
+type InterfaceInfo struct {
+	Name       string
+	MacAddress string
+	IP         string
+	Netmask    string
+}
